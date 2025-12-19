@@ -123,7 +123,6 @@ static void execute_sql_now(char **sqlp)
 static int do_curl(switch_event_t *event, profile_t *profile)
 {
 	switch_CURL *curl_handle = NULL;
-	CURLcode result;
 	int httpRes = 0;
 	switch_curl_slist_t *headers = NULL;
 	char *query = NULL;
