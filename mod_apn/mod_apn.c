@@ -123,8 +123,7 @@ static void execute_sql_now(char **sqlp)
 static int do_curl(switch_event_t *event, profile_t *profile)
 {
 	switch_CURL *curl_handle = NULL;
-	CURLCode result;
-	long response_code;
+	CURLcode result;
 	int httpRes = 0;
 	switch_curl_slist_t *headers = NULL;
 	char *query = NULL;
@@ -192,9 +191,9 @@ static int do_curl(switch_event_t *event, profile_t *profile)
 	switch_curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "freeswitch-mod_apn/2.0");
 
 	
-	result = switch_curl_easy_perform(curl_handle);
-	response_code = switch_curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &httpRes);
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "response status: %d\n", response_code);
+	switch_curl_easy_perform(curl_handle);
+	switch_curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &httpRes);
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "response status: %d\n", httpRes);
 	switch_curl_easy_cleanup(curl_handle);
 	switch_curl_slist_free_all(headers);
 	
