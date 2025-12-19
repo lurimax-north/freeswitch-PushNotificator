@@ -123,9 +123,12 @@ static void execute_sql_now(char **sqlp)
 static int do_curl(switch_event_t *event, profile_t *profile)
 {
 	switch_CURL *curl_handle = NULL;
+	CURLCode result;
+	long response_code;
 	int httpRes = 0;
 	switch_curl_slist_t *headers = NULL;
 	char *query = NULL;
+	char *post_data = NULL;
 
 	const char *url_template = profile->url;
 	const char *method = profile->method;
@@ -150,14 +153,12 @@ static int do_curl(switch_event_t *event, profile_t *profile)
 
 	if (!strcasecmp(method, "post")) {
 		if (!zstr(profile->post_data_template)) {
-			char *post_data = switch_event_expand_headers(event, profile->post_data_template);
+			post_data = switch_event_expand_headers(event, profile->post_data_template);
 			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "method: %s, url: %s, data: %s\n", method, query,
 							  post_data);
 			switch_curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDSIZE, strlen(post_data));
 			switch_curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, (void *) post_data);
 
-			if (post_data != profile->post_data_template)
-				switch_safe_free(post_data);
 		}
 		if (content_type) {
 			char *ct = switch_mprintf("Content-Type: %s", content_type);
@@ -190,13 +191,20 @@ static int do_curl(switch_event_t *event, profile_t *profile)
 	switch_curl_easy_setopt(curl_handle, CURLOPT_NOSIGNAL, 1);
 	switch_curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "freeswitch-mod_apn/2.0");
 
-	switch_curl_easy_perform(curl_handle);
-	switch_curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &httpRes);
+	
+	result = switch_curl_easy_perform(curl_handle);
+	response_code = switch_curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &httpRes);
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "response status: %d\n", response_code);
 	switch_curl_easy_cleanup(curl_handle);
 	switch_curl_slist_free_all(headers);
-
-	if (query != url_template) switch_safe_free(query);
-
+	
+	if (query != url_template){
+		switch_safe_free(query);
+	} 
+	if (post_data != profile->post_data_template){
+		switch_safe_free(post_data);
+	}
+	
 	return httpRes;
 }
 
@@ -206,7 +214,7 @@ static switch_bool_t mod_apn_send(switch_event_t *event, profile_t *profile)
 	switch_bool_t ret = SWITCH_FALSE;
 
 	if (!profile) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "CARUSTO. APN profile not found\n");
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "APN profile not found\n");
 		return ret;
 	}
 
@@ -578,7 +586,7 @@ static void db_get_tokens_array(char *user, char *realm, char *type, callback_t 
 {
 	char *query = NULL;
 	if (zstr(user) || zstr(realm)) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "CARUSTO. No parameters for get token. user: '%s', realm: '%s'\n", user, realm);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "No parameters for get token. user: '%s', realm: '%s'\n", user, realm);
 		return;
 	}
 
@@ -617,7 +625,7 @@ static void push_event_handler(switch_event_t *event)
 	uuid = switch_event_get_header(event, "uuid");
 
 	if (zstr(type) || zstr(user) || zstr(realm)) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "CARUSTO. No parameters, data: '%s', type: '%s', user: '%s', realm: '%s'\n", payload, type, user, realm);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "No parameters, data: '%s', type: '%s', user: '%s', realm: '%s'\n", payload, type, user, realm);
 		goto end;
 	}
 
@@ -633,7 +641,7 @@ static void push_event_handler(switch_event_t *event)
 	db_get_tokens_array(user, realm, type, &cbt);
 
 	if ((size = cJSON_GetArraySize(cbt.array)) == 0) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "CARUSTO. No one token found for type: '%s', user: '%s', realm: '%s'\n", type, user, realm);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "No one token found for type: '%s', user: '%s', realm: '%s'\n", type, user, realm);
 		goto end;
 	}
 
@@ -652,7 +660,7 @@ end:
 	if (!zstr(uuid) && switch_event_create_subclass(&res_event, SWITCH_EVENT_CUSTOM, "mobile::push::response") == SWITCH_STATUS_SUCCESS) {
 		switch_event_add_header_string(res_event, SWITCH_STACK_BOTTOM, "uuid", uuid);
 		switch_event_add_header_string(res_event, SWITCH_STACK_BOTTOM, "response", res ? "sent" : "notsent");
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "CARUSTO. Fire event mobile::push::response with ID: '%s' and result: '%s'\n", uuid, res ? "sent" : "notsent");
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Fire event mobile::push::response with ID: '%s' and result: '%s'\n", uuid, res ? "sent" : "notsent");
 		switch_event_fire(&res_event);
 		switch_event_destroy(&res_event);
 	}
@@ -722,7 +730,7 @@ static void originate_register_event_handler(switch_event_t *event)
 
 	update_reg = switch_event_get_header(event, "update-reg");
 	if (!zstr(update_reg) && switch_true(update_reg)) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "CARUSTO. Update existing registration, skip originate\n");
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Update existing registration, skip originate\n");
 		return;
 	}
 
@@ -733,7 +741,7 @@ static void originate_register_event_handler(switch_event_t *event)
 	event_profile = switch_event_get_header(event, "profile-name");
 
 	if (zstr(event_username) || zstr(event_realm) || zstr(event_call_id) || zstr(event_profile) ||  zstr(event_contact) || zstr(domain_name) || zstr(dial_user)) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "CARUSTO. No parameter for originate call via sofia::register\n");
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "No parameter for originate call via sofia::register\n");
 		return;
 	}
 
@@ -744,7 +752,7 @@ static void originate_register_event_handler(switch_event_t *event)
 	dest = get_url_from_contact(event_contact);
 
 	if (zstr(dest)) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "CARUSTO. No destination contact data string\n");
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "No destination contact data string\n");
 		goto end;
 	}
 
@@ -764,7 +772,7 @@ static void originate_register_event_handler(switch_event_t *event)
 	originate_data->destination = switch_core_strdup(pool, destination);
 	switch_mutex_unlock(handles_mutex);
 
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "CARUSTO. Try originate to '%s' (by registration event)\n", destination);
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Try originate to '%s' (by registration event)\n", destination);
 
 end:
 	switch_safe_free(destination);
@@ -842,7 +850,7 @@ static void register_event_handler(switch_event_t *event)
 	event_realm = switch_event_get_header(event, "realm");
 
 	if (zstr(event_user) || zstr(event_realm)) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "CARUSTO. No parameter\n");
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "No parameter\n");
 		goto end;
 	}
 
@@ -855,12 +863,12 @@ static void register_event_handler(switch_event_t *event)
 
 		if (!zstr(voip_count) && strtol(voip_count, NULL, 10) == 0) {
 			/*Add new VoIP token to DB*/
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "CARUSTO. Add new VoIP token: '%s' to push_tokens for user %s@%s and application: %s\n", voip_token, event_user, event_realm, app_id);
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Add new VoIP token: '%s' to push_tokens for user %s@%s and application: %s\n", voip_token, event_user, event_realm, app_id);
 			query = switch_mprintf("INSERT INTO push_tokens (token, extension, realm, app_id, type, platform) VALUES ('%q', '%q', '%q', '%q', 'voip', '%q')", voip_token, event_user, event_realm, app_id, platform);
 			execute_sql_now(&query);
 			switch_safe_free(query);
 		} else {
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "CARUSTO. VoIP token: '%s' for user %s@%s and application: %s already exists\n", voip_token, event_user, event_realm, app_id);
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "VoIP token: '%s' for user %s@%s and application: %s already exists\n", voip_token, event_user, event_realm, app_id);
 			query = switch_mprintf("UPDATE push_tokens SET last_update = CURRENT_TIMESTAMP WHERE token = '%q' AND extension = '%q' AND realm = '%q' AND app_id = '%q' AND type = 'voip'", im_token, event_user, event_realm, app_id);
 			execute_sql_now(&query);
 			switch_safe_free(query);
@@ -876,12 +884,12 @@ static void register_event_handler(switch_event_t *event)
 
 		if (!zstr(im_count) && strtol(im_count, NULL, 10) == 0) {
 			/*Add new IM token to DB*/
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "CARUSTO. Add new IM token: '%s' to push_tokens for user %s@%s and application: %s\n", im_token, event_user, event_realm, app_id);
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Add new IM token: '%s' to push_tokens for user %s@%s and application: %s\n", im_token, event_user, event_realm, app_id);
 			query = switch_mprintf("INSERT INTO push_tokens (token, extension, realm, app_id, type, platform) VALUES ('%q', '%q', '%q', '%q', 'im', '%q')", im_token, event_user, event_realm, app_id, platform);
 			execute_sql_now(&query);
 			switch_safe_free(query);
 		} else {
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "CARUSTO. IM token: '%s' for user %s@%s and application: %s already exists\n", im_token, event_user, event_realm, app_id);
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IM token: '%s' for user %s@%s and application: %s already exists\n", im_token, event_user, event_realm, app_id);
 			query = switch_mprintf("UPDATE push_tokens SET last_update = CURRENT_TIMESTAMP WHERE token = '%q' AND extension = '%q' AND realm = '%q' AND app_id = '%q' AND type = 'im'", im_token, event_user, event_realm, app_id);
 			execute_sql_now(&query);
 			switch_safe_free(query);
@@ -1072,7 +1080,7 @@ static switch_call_cause_t apn_wait_outgoing_channel(switch_core_session_t *sess
 			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "user", user);
 			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "realm", domain);
 			switch_event_add_body(event, "{\"content-available\":true,\"custom\":[{\"name\":\"content-message\",\"value\":\"incomming call\"}]}");
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "CARUSTO. Fire event APN for User: %s@%s\n", user, domain);
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Fire event APN for User: %s@%s\n", user, domain);
 			switch_event_fire(&event);
 			switch_event_destroy(&event);
 		}
@@ -1086,7 +1094,7 @@ static switch_call_cause_t apn_wait_outgoing_channel(switch_core_session_t *sess
 			switch_mutex_lock(apn_response.mutex);
 			if (apn_response.state == MOD_APN_NOTSENT) {
 				switch_mutex_unlock(apn_response.mutex);
-				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "CARUSTO. Event APN don't sent to %s@%s, so stop wait for incoming register\n", user, domain);
+				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Event APN don't sent to %s@%s, so stop wait for incoming register\n", user, domain);
 				break;
 			}
 			switch_mutex_unlock(apn_response.mutex);
